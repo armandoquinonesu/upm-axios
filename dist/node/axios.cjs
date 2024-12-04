@@ -8,6 +8,7 @@ const http = require('http');
 const https = require('https');
 const util = require('util');
 const followRedirects = require('follow-redirects');
+const httpsProxyAgent = require('https-proxy-agent');
 const zlib = require('zlib');
 const stream = require('stream');
 const events = require('events');
@@ -2593,23 +2594,6 @@ const flushOnFinish = (stream, [throttled, flush]) => {
 };
 
 /**
- * If the proxy or config beforeRedirects functions are defined, call them with the options
- * object.
- *
- * @param {Object<string, any>} options - The options object that was passed to the request.
- *
- * @returns {Object<string, any>}
- */
-function dispatchBeforeRedirect(options, responseDetails) {
-  if (options.beforeRedirects.proxy) {
-    options.beforeRedirects.proxy(options);
-  }
-  if (options.beforeRedirects.config) {
-    options.beforeRedirects.config(options, responseDetails);
-  }
-}
-
-/**
  * If the proxy or config afterRedirects functions are defined, call them with the options
  *
  * @param {http.ClientRequestArgs} options
@@ -2619,11 +2603,11 @@ function dispatchBeforeRedirect(options, responseDetails) {
  * @returns {http.ClientRequestArgs}
  */
 function setProxy(options, configProxy, location) {
-  let proxy = configProxy;
+  let proxy = configProxy.proxy;
   if (!proxy && proxy !== false) {
     const proxyUrl = proxyFromEnv.getProxyForUrl(location);
     if (proxyUrl) {
-      proxy = new URL(proxyUrl);
+      proxy = url__default["default"].parse(proxyUrl);
     }
   }
   if (proxy) {
@@ -2635,24 +2619,66 @@ function setProxy(options, configProxy, location) {
     if (proxy.auth) {
       // Support proxy auth object form
       if (proxy.auth.username || proxy.auth.password) {
-        proxy.auth = (proxy.auth.username || '') + ':' + (proxy.auth.password || '');
+        proxy.username =proxy.auth.username;
+        proxy.password =proxy.auth.password;
+        proxy.auth = (proxy.auth.username || '') + ':' + (proxy.auth.password || '');     
+      } else {
+        [proxy.username, proxy.password] = proxy.auth.split(':');
       }
       const base64 = Buffer
         .from(proxy.auth, 'utf8')
         .toString('base64');
       options.headers['Proxy-Authorization'] = 'Basic ' + base64;
     }
+    var proxyHost = proxy.hostname || proxy.host; // prefer hostname in case proxy is the result of url.parse
+    if (isHttps.test(options.protocol)) {
+      // Proxying over TCP tunnel (required for secure HTTPS proxying)
 
-    options.headers.host = options.hostname + (options.port ? ':' + options.port : '');
-    const proxyHost = proxy.hostname || proxy.host;
-    options.hostname = proxyHost;
-    // Replace 'host' since options is not a URL object
-    options.host = proxyHost;
-    options.port = proxy.port;
-    options.path = location;
-    if (proxy.protocol) {
-      options.protocol = proxy.protocol.includes(':') ? proxy.protocol : `${proxy.protocol}:`;
+      // Make sure TLS options are passed from user-configured options to the proxy agent
+      var agentOptions = configProxy.httpsAgent ? configProxy.httpsAgent.options : {};      
+      var proxyAgentOptions = utils$1.merge(agentOptions, proxy);
+
+      // Workaround: ERR_TLS_CERT_ALTNAME_INVALID when connecting to proxy
+      // with custom cert that only has 127.0.0.1 as its CN/SAT
+      // (https://github.com/TooTallNate/node-https-proxy-agent/issues/131)
+      proxyAgentOptions.servername = proxy.servername || proxyHost;
+
+      options.agents.https = new httpsProxyAgent.HttpsProxyAgent(proxyAgentOptions, {
+        ca: agentOptions.ca,
+      });
+      // Workaround: avoid ca/rejectUnauthorized regression
+      // (https://github.com/TooTallNate/node-https-proxy-agent/issues/121)
+      if (agentOptions.ca !== undefined) {
+        options.ca = agentOptions.ca;
+      }
+      if (agentOptions.rejectUnauthorized !== undefined) {
+        options.rejectUnauthorized = agentOptions.rejectUnauthorized;
+      }
+    }  else {
+      // Basic HTTP proxying
+      options.headers.host = options.hostname + (options.port ? ':' + options.port : '');
+      options.hostname = proxyHost;
+      options.host = proxyHost;
+      options.port = proxy.port;
+      options.path = location;
+      if (proxy.protocol) {
+        options.protocol = proxy.protocol;
+
+        if (isHttps.test(proxy.protocol)) {
+          // Workaround: ERR_TLS_CERT_ALTNAME_INVALID error due to Node's `https` implementation
+          // using options.headers.host as the servername default rather than `options.hostname`
+          options.servername = proxy.servername || proxyHost;
+        }
+      }
+
+      if (proxy.auth) {
+        var base64 = Buffer
+          .from(proxy.auth, 'utf8')
+          .toString('base64');
+        options.headers['Proxy-Authorization'] = 'Basic ' + base64;
+      }
     }
+    
   }
 
   options.beforeRedirects.proxy = function beforeRedirect(redirectOptions) {
@@ -2852,7 +2878,7 @@ const httpAdapter = isHttpAdapterSupported && function httpAdapter(config) {
         } catch (e) {
         }
       }
-    } else if (utils$1.isBlob(data)) {
+    } else if (utils$1.isBlob(data) || utils$1.isFile(data)) {
       data.size && headers.setContentType(data.type || 'application/octet-stream');
       headers.setContentLength(data.size || 0);
       data = stream__default["default"].Readable.from(readBlob$1(data));
@@ -2953,7 +2979,6 @@ const httpAdapter = isHttpAdapterSupported && function httpAdapter(config) {
       auth,
       protocol,
       family,
-      beforeRedirect: dispatchBeforeRedirect,
       beforeRedirects: {}
     };
 
@@ -2965,7 +2990,21 @@ const httpAdapter = isHttpAdapterSupported && function httpAdapter(config) {
     } else {
       options.hostname = parsed.hostname.startsWith("[") ? parsed.hostname.slice(1, -1) : parsed.hostname;
       options.port = parsed.port;
-      setProxy(options, config.proxy, protocol + '//' + parsed.hostname + (parsed.port ? ':' + parsed.port : '') + options.path);
+      setProxy(options, config, protocol + '//' + parsed.hostname + (parsed.port ? ':' + parsed.port : '') + options.path);
+
+      options.beforeRedirect = function dispatchBeforeRedirect(redirectOptions) {
+        // Reset request options altered due to workarounds in case a different proxy config is used
+        redirectOptions.agents.https = config.httpsAgent;
+        redirectOptions.servername = config.servername;
+
+        if (config.beforeRedirect) {
+          config.beforeRedirect(redirectOptions, config);
+        }
+    
+        // Configure proxy for redirected request, passing the original config to apply
+        // the exact same logic as if the redirected request was performed by axios directly.
+        setProxy(redirectOptions, config, redirectOptions.href);
+      };
     }
 
     let transport;
@@ -3105,7 +3144,7 @@ const httpAdapter = isHttpAdapterSupported && function httpAdapter(config) {
           }
 
           const err = new AxiosError(
-            'maxContentLength size of ' + config.maxContentLength + ' exceeded',
+            'stream has been aborted',
             AxiosError.ERR_BAD_RESPONSE,
             config,
             lastRequest
@@ -3346,7 +3385,7 @@ function mergeConfig(config1, config2) {
   config2 = config2 || {};
   const config = {};
 
-  function getMergedValue(target, source, caseless) {
+  function getMergedValue(target, source, prop, caseless) {
     if (utils$1.isPlainObject(target) && utils$1.isPlainObject(source)) {
       return utils$1.merge.call({caseless}, target, source);
     } else if (utils$1.isPlainObject(source)) {
@@ -3358,11 +3397,11 @@ function mergeConfig(config1, config2) {
   }
 
   // eslint-disable-next-line consistent-return
-  function mergeDeepProperties(a, b, caseless) {
+  function mergeDeepProperties(a, b, prop , caseless) {
     if (!utils$1.isUndefined(b)) {
-      return getMergedValue(a, b, caseless);
+      return getMergedValue(a, b, prop , caseless);
     } else if (!utils$1.isUndefined(a)) {
-      return getMergedValue(undefined, a, caseless);
+      return getMergedValue(undefined, a, prop , caseless);
     }
   }
 
@@ -3420,7 +3459,7 @@ function mergeConfig(config1, config2) {
     socketPath: defaultToConfig2,
     responseEncoding: defaultToConfig2,
     validateStatus: mergeDirectKeys,
-    headers: (a, b) => mergeDeepProperties(headersToObject(a), headersToObject(b), true)
+    headers: (a, b , prop) => mergeDeepProperties(headersToObject(a), headersToObject(b),prop, true)
   };
 
   utils$1.forEach(Object.keys(Object.assign({}, config1, config2)), function computeConfigValue(prop) {
@@ -4213,6 +4252,14 @@ validators$1.transitional = function transitional(validator, version, message) {
   };
 };
 
+validators$1.spelling = function spelling(correctSpelling) {
+  return (value, opt) => {
+    // eslint-disable-next-line no-console
+    console.warn(`${opt} is likely a misspelling of ${correctSpelling}`);
+    return true;
+  }
+};
+
 /**
  * Assert object's properties type
  *
@@ -4282,9 +4329,9 @@ class Axios {
       return await this._request(configOrUrl, config);
     } catch (err) {
       if (err instanceof Error) {
-        let dummy;
+        let dummy = {};
 
-        Error.captureStackTrace ? Error.captureStackTrace(dummy = {}) : (dummy = new Error());
+        Error.captureStackTrace ? Error.captureStackTrace(dummy) : (dummy = new Error());
 
         // slice off the Error: ... line
         const stack = dummy.stack ? dummy.stack.replace(/^.+\n/, '') : '';
@@ -4338,6 +4385,11 @@ class Axios {
         }, true);
       }
     }
+
+    validator.assertOptions(config, {
+      baseUrl: validators.spelling('baseURL'),
+      withXsrfToken: validators.spelling('withXSRFToken')
+    }, true);
 
     // Set config.method
     config.method = (config.method || this.defaults.method || 'get').toLowerCase();
