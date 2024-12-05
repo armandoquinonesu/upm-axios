@@ -1,9 +1,13 @@
-// Axios v1.7.7 Copyright (c) 2024 Matt Zabriskie and contributors
+// Axios v1.7.9 Copyright (c) 2024 Matt Zabriskie and contributors
 (function (global, factory) {
-  typeof exports === 'object' && typeof module !== 'undefined' ? module.exports = factory() :
-  typeof define === 'function' && define.amd ? define(factory) :
-  (global = typeof globalThis !== 'undefined' ? globalThis : global || self, global.axios = factory());
-})(this, (function () { 'use strict';
+  typeof exports === 'object' && typeof module !== 'undefined' ? module.exports = factory(require('util'), require('stream')) :
+  typeof define === 'function' && define.amd ? define(['util', 'stream'], factory) :
+  (global = typeof globalThis !== 'undefined' ? globalThis : global || self, global.axios = factory(global.util, global.stream));
+})(this, (function (util, stream) { 'use strict';
+
+  function _interopDefaultLegacy (e) { return e && typeof e === 'object' && 'default' in e ? e : { 'default': e }; }
+
+  var util__default = /*#__PURE__*/_interopDefaultLegacy(util);
 
   function _AsyncGenerator(e) {
     var r, t;
@@ -1735,7 +1739,7 @@
    *
    * @param {string} url The base of the url (e.g., http://www.google.com)
    * @param {object} [params] The params to be appended
-   * @param {?object} options
+   * @param {?(object|Function)} options
    *
    * @returns {string} The formatted url
    */
@@ -1745,6 +1749,11 @@
       return url;
     }
     var _encode = options && options.encode || encode;
+    if (utils$1.isFunction(options)) {
+      options = {
+        serialize: options
+      };
+    }
     var serializeFn = options && options.serialize;
     var serializedParams;
     if (serializeFn) {
@@ -2642,60 +2651,14 @@
     };
   };
 
-  var isURLSameOrigin = platform.hasStandardBrowserEnv ?
-  // Standard browser envs have full support of the APIs needed to test
-  // whether the request URL is of the same origin as current location.
-  function standardBrowserEnv() {
-    var msie = platform.navigator && /(msie|trident)/i.test(platform.navigator.userAgent);
-    var urlParsingNode = document.createElement('a');
-    var originURL;
-
-    /**
-    * Parse a URL to discover its components
-    *
-    * @param {String} url The URL to be parsed
-    * @returns {Object}
-    */
-    function resolveURL(url) {
-      var href = url;
-      if (msie) {
-        // IE needs attribute set twice to normalize properties
-        urlParsingNode.setAttribute('href', href);
-        href = urlParsingNode.href;
-      }
-      urlParsingNode.setAttribute('href', href);
-
-      // urlParsingNode provides the UrlUtils interface - http://url.spec.whatwg.org/#urlutils
-      return {
-        href: urlParsingNode.href,
-        protocol: urlParsingNode.protocol ? urlParsingNode.protocol.replace(/:$/, '') : '',
-        host: urlParsingNode.host,
-        search: urlParsingNode.search ? urlParsingNode.search.replace(/^\?/, '') : '',
-        hash: urlParsingNode.hash ? urlParsingNode.hash.replace(/^#/, '') : '',
-        hostname: urlParsingNode.hostname,
-        port: urlParsingNode.port,
-        pathname: urlParsingNode.pathname.charAt(0) === '/' ? urlParsingNode.pathname : '/' + urlParsingNode.pathname
-      };
-    }
-    originURL = resolveURL(window.location.href);
-
-    /**
-    * Determine if a URL shares the same origin as the current location
-    *
-    * @param {String} requestURL The URL to test
-    * @returns {boolean} True if URL shares the same origin, otherwise false
-    */
-    return function isURLSameOrigin(requestURL) {
-      var parsed = utils$1.isString(requestURL) ? resolveURL(requestURL) : requestURL;
-      return parsed.protocol === originURL.protocol && parsed.host === originURL.host;
+  var isURLSameOrigin = platform.hasStandardBrowserEnv ? function (origin, isMSIE) {
+    return function (url) {
+      url = new URL(url, platform.origin);
+      return origin.protocol === url.protocol && origin.host === url.host && (isMSIE || origin.port === url.port);
     };
-  }() :
-  // Non standard browser envs (web workers, react-native) lack needed support.
-  function nonStandardBrowserEnv() {
-    return function isURLSameOrigin() {
-      return true;
-    };
-  }();
+  }(new URL(platform.origin), platform.navigator && /(msie|trident)/i.test(platform.navigator.userAgent)) : function () {
+    return true;
+  };
 
   var cookies = platform.hasStandardBrowserEnv ?
   // Standard browser envs support document.cookie
@@ -3717,7 +3680,7 @@
     });
   }
 
-  var VERSION = "1.7.7";
+  var VERSION = "1.7.9";
 
   var validators$1 = {};
 
@@ -4257,6 +4220,205 @@
   });
   var HttpStatusCode$1 = HttpStatusCode;
 
+  var asyncIterator = Symbol.asyncIterator;
+  var readBlob = /*#__PURE__*/function () {
+    var _ref = _wrapAsyncGenerator( /*#__PURE__*/_regeneratorRuntime().mark(function _callee(blob) {
+      return _regeneratorRuntime().wrap(function _callee$(_context) {
+        while (1) switch (_context.prev = _context.next) {
+          case 0:
+            if (!blob.stream) {
+              _context.next = 4;
+              break;
+            }
+            return _context.delegateYield(_asyncGeneratorDelegate(_asyncIterator(blob.stream())), "t0", 2);
+          case 2:
+            _context.next = 17;
+            break;
+          case 4:
+            if (!blob.arrayBuffer) {
+              _context.next = 11;
+              break;
+            }
+            _context.next = 7;
+            return _awaitAsyncGenerator(blob.arrayBuffer());
+          case 7:
+            _context.next = 9;
+            return _context.sent;
+          case 9:
+            _context.next = 17;
+            break;
+          case 11:
+            if (!blob[asyncIterator]) {
+              _context.next = 15;
+              break;
+            }
+            return _context.delegateYield(_asyncGeneratorDelegate(_asyncIterator(blob[asyncIterator]())), "t1", 13);
+          case 13:
+            _context.next = 17;
+            break;
+          case 15:
+            _context.next = 17;
+            return blob;
+          case 17:
+          case "end":
+            return _context.stop();
+        }
+      }, _callee);
+    }));
+    return function readBlob(_x) {
+      return _ref.apply(this, arguments);
+    };
+  }();
+  var readBlob$1 = readBlob;
+
+  var BOUNDARY_ALPHABET = utils$1.ALPHABET.ALPHA_DIGIT + '-_';
+  var textEncoder = typeof TextEncoder === 'function' ? new TextEncoder() : new util__default["default"].TextEncoder();
+  var CRLF = '\r\n';
+  var CRLF_BYTES = textEncoder.encode(CRLF);
+  var CRLF_BYTES_COUNT = 2;
+  var FormDataPart = /*#__PURE__*/function () {
+    function FormDataPart(name, value) {
+      _classCallCheck(this, FormDataPart);
+      var escapeName = this.constructor.escapeName;
+      var isStringValue = utils$1.isString(value);
+      var headers = "Content-Disposition: form-data; name=\"".concat(escapeName(name), "\"").concat(!isStringValue && value.name ? "; filename=\"".concat(escapeName(value.name), "\"") : '').concat(CRLF);
+      if (isStringValue) {
+        value = textEncoder.encode(String(value).replace(/\r?\n|\r\n?/g, CRLF));
+      } else {
+        headers += "Content-Type: ".concat(value.type || "application/octet-stream").concat(CRLF);
+      }
+      this.headers = textEncoder.encode(headers + CRLF);
+      this.contentLength = isStringValue ? value.byteLength : value.size;
+      this.size = this.headers.byteLength + this.contentLength + CRLF_BYTES_COUNT;
+      this.name = name;
+      this.value = value;
+    }
+    _createClass(FormDataPart, [{
+      key: "encode",
+      value: function encode() {
+        var _this = this;
+        return _wrapAsyncGenerator( /*#__PURE__*/_regeneratorRuntime().mark(function _callee() {
+          var value;
+          return _regeneratorRuntime().wrap(function _callee$(_context) {
+            while (1) switch (_context.prev = _context.next) {
+              case 0:
+                _context.next = 2;
+                return _this.headers;
+              case 2:
+                value = _this.value;
+                if (!utils$1.isTypedArray(value)) {
+                  _context.next = 8;
+                  break;
+                }
+                _context.next = 6;
+                return value;
+              case 6:
+                _context.next = 9;
+                break;
+              case 8:
+                return _context.delegateYield(_asyncGeneratorDelegate(_asyncIterator(readBlob$1(value))), "t0", 9);
+              case 9:
+                _context.next = 11;
+                return CRLF_BYTES;
+              case 11:
+              case "end":
+                return _context.stop();
+            }
+          }, _callee);
+        }))();
+      }
+    }], [{
+      key: "escapeName",
+      value: function escapeName(name) {
+        return String(name).replace(/[\r\n"]/g, function (match) {
+          return {
+            '\r': '%0D',
+            '\n': '%0A',
+            '"': '%22'
+          }[match];
+        });
+      }
+    }]);
+    return FormDataPart;
+  }();
+  var formDataToStream = function formDataToStream(form, headersHandler, options) {
+    var _ref2 = options || {},
+      _ref2$tag = _ref2.tag,
+      tag = _ref2$tag === void 0 ? 'form-data-boundary' : _ref2$tag,
+      _ref2$size = _ref2.size,
+      size = _ref2$size === void 0 ? 25 : _ref2$size,
+      _ref2$boundary = _ref2.boundary,
+      boundary = _ref2$boundary === void 0 ? tag + '-' + utils$1.generateString(size, BOUNDARY_ALPHABET) : _ref2$boundary;
+    if (!utils$1.isFormData(form)) {
+      throw TypeError('FormData instance required');
+    }
+    if (boundary.length < 1 || boundary.length > 70) {
+      throw Error('boundary must be 10-70 characters long');
+    }
+    var boundaryBytes = textEncoder.encode('--' + boundary + CRLF);
+    var footerBytes = textEncoder.encode('--' + boundary + '--' + CRLF + CRLF);
+    var contentLength = footerBytes.byteLength;
+    var parts = Array.from(form.entries()).map(function (_ref3) {
+      var _ref4 = _slicedToArray(_ref3, 2),
+        name = _ref4[0],
+        value = _ref4[1];
+      var part = new FormDataPart(name, value);
+      contentLength += part.size;
+      return part;
+    });
+    contentLength += boundaryBytes.byteLength * parts.length;
+    contentLength = utils$1.toFiniteNumber(contentLength);
+    var computedHeaders = {
+      'Content-Type': "multipart/form-data; boundary=".concat(boundary)
+    };
+    if (Number.isFinite(contentLength)) {
+      computedHeaders['Content-Length'] = contentLength;
+    }
+    headersHandler && headersHandler(computedHeaders);
+    return stream.Readable.from(_wrapAsyncGenerator( /*#__PURE__*/_regeneratorRuntime().mark(function _callee2() {
+      var _iterator, _step, part;
+      return _regeneratorRuntime().wrap(function _callee2$(_context2) {
+        while (1) switch (_context2.prev = _context2.next) {
+          case 0:
+            _iterator = _createForOfIteratorHelper(parts);
+            _context2.prev = 1;
+            _iterator.s();
+          case 3:
+            if ((_step = _iterator.n()).done) {
+              _context2.next = 10;
+              break;
+            }
+            part = _step.value;
+            _context2.next = 7;
+            return boundaryBytes;
+          case 7:
+            return _context2.delegateYield(_asyncGeneratorDelegate(_asyncIterator(part.encode())), "t0", 8);
+          case 8:
+            _context2.next = 3;
+            break;
+          case 10:
+            _context2.next = 15;
+            break;
+          case 12:
+            _context2.prev = 12;
+            _context2.t1 = _context2["catch"](1);
+            _iterator.e(_context2.t1);
+          case 15:
+            _context2.prev = 15;
+            _iterator.f();
+            return _context2.finish(15);
+          case 18:
+            _context2.next = 20;
+            return footerBytes;
+          case 20:
+          case "end":
+            return _context2.stop();
+        }
+      }, _callee2, null, [[1, 12, 15, 18]]);
+    }))());
+  };
+  var formDataToStream$1 = formDataToStream;
+
   /**
    * Create an instance of Axios
    *
@@ -4321,6 +4483,7 @@
   };
   axios.getAdapter = adapters.getAdapter;
   axios.HttpStatusCode = HttpStatusCode$1;
+  axios.formDataToStream = formDataToStream$1;
   axios["default"] = axios;
 
   return axios;
